@@ -800,7 +800,11 @@ void App::play_selected() {
 void App::play_relative(int delta) {
     size_t list_len = (list_source_ == ListSource::Local) ? local_view_.size() : online_view_.size();
     if (list_len == 0) return;
-    selected_ = std::clamp(selected_ + delta, 0, static_cast<int>(list_len) - 1);
+    int target = selected_ + delta;
+    // Past either end: do nothing. Clamping here used to replay the last
+    // track forever once list-mode playback reached the end of the list.
+    if (target < 0 || target >= static_cast<int>(list_len)) return;
+    selected_ = target;
     if (selected_ >= scroll_ + kListVisibleRows) scroll_ = selected_ - kListVisibleRows + 1;
     if (selected_ < scroll_) scroll_ = selected_;
     play_selected();

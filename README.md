@@ -30,29 +30,36 @@ I created Mousiki because I wanted a fast, focused TUI (Terminal User Interface)
 
 ## Default Keybindings
 
-Configurable in `$HOME/.config/mousiki/config.txt`.
+Keys are currently fixed in the code. The `HKey...` entries in `$HOME/.config/mousiki/config.txt` are not read yet.
 
 ### Search & Playback
 | Action | Keybinding | Description |
 | :--- | :--- | :--- |
-| **Local Search** | `/` | Filter and search local library |
-| **Online Stream Search** | `/s: <query>` | Search and stream music online |
-| **Download Stream** | `y` | Download currently streaming track |
-| **Play / Pause** | `p` (or `ENTER`) | Toggle playback |
-| **Next / Previous Track** | `n` / `b` | Skip between songs |
-| **Seek** | `ARROW_LEFT` / `ARROW_RIGHT` | Seek backward / forward |
-| **Volume** | `1` / `2` | Decrease / Increase volume |
-| **Shuffle / Repeat** | `m` / `r` | Toggle shuffle or repeat mode |
+| **Local Search** | `/` | Filter the local library as you type. `ENTER` keeps the result, `ESC` cancels |
+| **Online Stream Search** | `/` then `s: query` | Search and stream music online |
+| **Home View** | `ESC` | Back to the full local library, unfiltered |
+| **Play** | `ENTER` | Play the selected track |
+| **Play / Pause** | `p` | Toggle playback |
+| **Next / Previous Track** | `n` / `b` | Play the next or previous row of the current list |
+| **Seek** | `ARROW_LEFT` / `ARROW_RIGHT` | Seek 5 seconds backward / forward |
+| **Volume** | `1` / `2` | Increase / Decrease volume |
+| **Retry Lyrics** | `l` | Fetch lyrics for the current track again |
+| **Waveform Style** | `w` | Toggle raw / smooth waveform |
+
+Shuffle, loop, and stop-after-track are set with `PlaybackMode` in settings (`s`).
 
 ### Navigation & Queue
 | Action | Keybinding | Description |
 | :--- | :--- | :--- |
 | **Navigate** | `ARROW_UP` / `ARROW_DOWN` | Move selection |
-| **Switch Tabs/Cards** | `TAB` | Cycle between UI panels |
+| **Sort** | `T` | Cycle folder order / title A-Z / artist A-Z |
+| **Switch Focus** | `TAB` | Move focus between the library and the queue |
 | **Add to Queue** | `a` | Enqueue selected track |
-| **Remove from Queue** | `d` | Dequeue selected track |
-| **Filter by Folder** | `f` | Apply folder filter |
-| **Clear Filter** | `c` | Reset active search/filters |
+| **Remove from Queue** | `t` | Remove the selected queue item |
+| **Remove Last Queued** | `d` | Remove the last item in the queue |
+| **Reorder Queue** | `u` / `ARROW_LEFT` | With the queue focused, move the selected item up / down |
+| **Settings** | `s` | Open settings. `TAB` changes panel, `s` saves and closes, `ESC` closes |
+| **Redraw** | `r` | Redraw the screen after a resize glitch |
 | **Quit** | `q` | Exit application |
 
 

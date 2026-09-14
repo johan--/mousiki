@@ -8,18 +8,31 @@ namespace muisc {
 
 bool LocalSource::is_audio_file(const fs::path& p) {
     static const std::set<std::string> exts = {".wav", ".mp3", ".opus", ".flac", ".ogg", ".m4a", ".aac", ".webm"};
-    return exts.count(p.extension().string()) > 0;
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+    return exts.count(ext) > 0;
 }
 
 std::vector<LocalTrack> LocalSource::scan(const std::vector<std::string>& custom_paths) const {
     std::vector<LocalTrack> tracks;
     std::vector<fs::path> roots;
 
-    if (!custom_paths.empty()) {
-        for (const auto& cp : custom_paths) {
-            roots.push_back(fs::path(cp));
-        }
-    } else {
+    for (const auto& cp : custom_paths) {
+        roots.push_back(fs::path(cp));
+    }
+
+    // Fall back to the defaults when no configured path exists, not only
+    // when none are configured -- a config copied from another machine
+    // (e.g. Termux paths on desktop Linux) would otherwise leave the
+    // library empty.
+    bool any_root_exists = false;
+    for (const auto& root : roots) {
+        std::error_code ec;
+        if (fs::is_directory(root, ec)) { any_root_exists = true; break; }
+    }
+
+    if (!any_root_exists) {
+        roots.clear();
         const char* home = std::getenv("HOME");
         if (home) {
             roots.push_back(fs::path(home) / "Music");
