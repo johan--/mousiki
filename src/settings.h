@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 // the settings panel with Enter. "_end" fields, when non-empty, turn a
 // solid color into a gradient between the base color and that end color.
 struct Settings {
-    // --- element visibility toggles (config.txt: "Eliment_*") ----------
+    // --- element visibility toggles (config.txt: "Show*") --------------
     bool element_disk = true;
     bool element_dummy_buttons = true;
     bool element_queue = true;           // replaces the old queue_visible
@@ -50,12 +50,6 @@ struct Settings {
     // Maps ASCII letter → {uppercase_display, lowercase_display}.
     // Empty map = use default ASCII glyphs.
     std::unordered_map<char, std::pair<std::string, std::string>> font_map;
-    // Raw lines of the config file's trailing ClassTextAboutApp={...}; block
-    // -- the About App tab displays these verbatim rather than a hardcoded
-    // string, so editing the config file's own about-text actually changes
-    // what's shown. Falls back to a sensible default if the config has no
-    // such section (e.g. a freshly-generated config.txt).
-    std::vector<std::string> about_app_lines;
 
     // --- colors --------------------------------------------------------
     // Defaults here match the "g_defaults" fallback map from the redesigned
@@ -136,7 +130,9 @@ struct Settings {
     std::vector<std::string> local_music_paths;
 
     // --- hotkey mapping ------------------------------------------------
-    // Action name → key string (e.g. "ARROW_KEY_UP", "s", "ENTER")
+    // Action name → key string (e.g. "ARROW_KEY_UP", "s", "ENTER", or a
+    // comma-separated list such as "n,N"). Names not in hotkey_defs() are
+    // kept so a save doesn't drop them, but they do nothing.
     std::unordered_map<std::string, std::string> hotkeys;
 
     // Convenience: resolve a hotkey action to the configured key code.
@@ -201,7 +197,27 @@ std::string apply_font_map(const std::string& text,
 const std::vector<std::string>& theme_names();
 void apply_theme(Settings& s, const std::string& theme_name);
 
-// Default hotkey bindings — used when config.txt doesn't specify them.
+// Every Browse-mode action a key can be bound to. Order matters: when two
+// actions share a key, the one listed first wins.
+enum class HotkeyAction {
+    OpenSettings, NavigateUp, NavigateDown, Play, TogglePlayPause,
+    NextSong, PreviousSong, SeekForward, SeekBackward,
+    IncreaseVolume, DecreaseVolume, Search,
+    AddToQueue, RemoveHoveringFromQueue, RemoveLastFromQueue,
+    MoveQueueItemUp, MoveQueueItemDown, SwitchFocus,
+    RetryLyrics, ToggleWaveform, CycleSort, Home, Redraw, Quit,
+};
+
+struct HotkeyDef {
+    HotkeyAction action;
+    const char* name;         // config.txt key, e.g. "HKeyQuit"
+    const char* label;        // Settings > Reference row label
+    const char* default_keys; // e.g. "q,Q"
+};
+
+const std::vector<HotkeyDef>& hotkey_defs();
+
+// Fills in the default for every hotkey name config.txt didn't set.
 void apply_default_hotkeys(Settings& s);
 
 // Config file path and I/O. Uses config.txt format (: and == separators).

@@ -3,6 +3,16 @@
 
 namespace muisc {
 
+// Key codes poll_key() returns for special keys. They sit above the byte
+// range so they never collide with a typed character (an arrow used to
+// come back as the letter 'A'..'D', indistinguishable from Shift+A..D).
+enum KeyCode : int {
+    KEY_ARROW_UP = 1000,
+    KEY_ARROW_DOWN,
+    KEY_ARROW_RIGHT,
+    KEY_ARROW_LEFT,
+};
+
 // Raw, non-canonical, no-echo terminal mode + non-blocking key reads.
 // Panel/box drawing lives in app.cpp; this is just the terminal plumbing.
 class TerminalIO {
@@ -13,7 +23,7 @@ public:
     void restore();
 
     // Non-blocking single "logical" key read. Arrow keys (3-byte escape
-    // sequences) collapse to 'A'/'B'/'C'/'D' (up/down/right/left). A lone
+    // sequences) collapse to the KEY_ARROW_* codes above. A lone
     // Escape key returns 27. Backspace returns 127. Returns 0 if nothing
     // is waiting.
     int poll_key();

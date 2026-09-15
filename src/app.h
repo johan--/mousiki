@@ -79,6 +79,14 @@ private:
     int queue_scroll_ = 0;
     bool queue_focus_ = false; // Tab toggles which panel Up/Down navigates
 
+    // --- play history (for 'previous track') ---
+    // Every track that started playing, oldest first; back() is the one
+    // playing now. Capped at kHistoryMax entries.
+    std::vector<QueueItem> history_;
+    static constexpr size_t kHistoryMax = 100;
+    bool replaying_history_ = false; // set by play_previous() so that load isn't recorded again
+    std::string current_video_id_;   // video id of the playing online track, empty for local
+
     // --- now playing ---
     bool has_track_ = false;
     fs::path current_path_;
@@ -118,6 +126,8 @@ private:
         std::shared_ptr<StreamingPcm> pcm;
         size_t total_sec = 0;
         TrackMetadata metadata;
+        bool is_local = true;
+        std::string video_id; // online tracks only
     };
     std::thread load_thread_;
     std::mutex load_mutex_;
@@ -190,11 +200,19 @@ private:
 
 
     // --- hotkey support ---
-    // Resolves a key code from poll_key() to the hotkey action name.
-    // Returns empty string if no match.
-    std::string resolve_hotkey_action(int key) const;
-    // Returns the key code that a hotkey string maps to for poll_key().
-    static int hotkey_string_to_key(const std::string& s);
+    // Key code from poll_key() -> Browse-mode action, built from
+    // settings_.hotkeys by rebuild_key_bindings().
+    std::unordered_map<int, HotkeyAction> key_bindings_;
+    // Last clash/unknown-key message from rebuild_key_bindings(), kept so a
+    // track load doesn't wipe it off the status line before it's seen.
+    std::string key_binding_warning_;
+    // Rebuilds key_bindings_ from settings_.hotkeys. On a clash the action
+    // listed first in hotkey_defs() keeps the key; clashes and unknown key
+    // names are reported on the status line.
+    void rebuild_key_bindings();
+    // Parses a hotkey string ("q", "n,N", "ARROW_KEY_UP") into the key
+    // codes poll_key() returns. Returns false if any part isn't a key.
+    static bool hotkey_string_to_keys(const std::string& s, std::vector<int>& out);
 
     // --- helpers ---
     void refresh_local_view();
@@ -206,8 +224,15 @@ private:
     void start_local_track(const LocalTrack& track);
     void start_online_track(const OnlineResult& result);
     void play_selected();
-    void play_relative(int delta);
+    void play_relative(int delta); // relative to the playing track's row, or the cursor if it isn't in the list
     void play_relative_random();
+    void play_next();     // next queued track, else the row after the playing track
+    void play_previous(); // back through history_, else the row above the playing track
+    // Starts the front queue item. Returns false only when the queue is
+    // empty; a load in progress leaves the item queued but still returns true.
+    bool play_from_queue();
+    void start_queue_item(const QueueItem& item);
+    int playing_row() const; // row of the playing track in the current list, or -1
     void advance_track();
     void queue_add_selected();
     void queue_remove_last();

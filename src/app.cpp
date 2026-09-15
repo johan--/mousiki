@@ -350,6 +350,7 @@ fs::path find_lyrics_script() {
 
 App::App() {
     settings_ = load_settings();
+    rebuild_key_bindings();
     lyrics_script_ = find_lyrics_script();
     all_local_tracks_ = local_source_.scan(settings_.local_music_paths);
     local_view_ = all_local_tracks_;
@@ -357,25 +358,63 @@ App::App() {
 }
 
 
-int App::hotkey_string_to_key(const std::string& s) {
-    if (s == "ARROW_KEY_UP") return 'A';
-    if (s == "ARROW_KEY_DOWN") return 'B';
-    if (s == "ARROW_KEY_RIGHT") return 'C';
-    if (s == "ARROW_KEY_LEFT") return 'D';
-    if (s == "ENTER") return '\n';
-    if (s == "TAB") return 9;
-    if (s == "SPACE") return ' ';
-    if (s == "ESC") return 27;
-    if (s == "BACKSPACE") return 127;
-    if (s.size() == 1) return static_cast<int>(s[0]);
-    return 0;
+bool App::hotkey_string_to_keys(const std::string& s, std::vector<int>& out) {
+    auto add_token = [&out](const std::string& t) {
+        if (t == "ARROW_KEY_UP") out.push_back(KEY_ARROW_UP);
+        else if (t == "ARROW_KEY_DOWN") out.push_back(KEY_ARROW_DOWN);
+        else if (t == "ARROW_KEY_RIGHT") out.push_back(KEY_ARROW_RIGHT);
+        else if (t == "ARROW_KEY_LEFT") out.push_back(KEY_ARROW_LEFT);
+        else if (t == "ENTER") { out.push_back('\n'); out.push_back('\r'); }
+        else if (t == "TAB") out.push_back(9);
+        else if (t == "SPACE") out.push_back(' ');
+        else if (t == "ESC") out.push_back(27);
+        else if (t == "BACKSPACE") { out.push_back(127); out.push_back(8); }
+        else if (t == "COMMA") out.push_back(',');
+        else if (t.size() == 1) out.push_back(static_cast<unsigned char>(t[0]));
+        else return false;
+        return true;
+    };
+    if (s == ",") return add_token(s); // a lone comma is the comma key, not a separator
+
+    bool ok = true;
+    std::string token;
+    std::istringstream in(s);
+    while (std::getline(in, token, ',')) {
+        size_t a = token.find_first_not_of(' ');
+        if (a == std::string::npos) continue; // empty part, e.g. "" (unbound) or "n,,N"
+        token = token.substr(a, token.find_last_not_of(' ') - a + 1);
+        if (!add_token(token)) ok = false;
+    }
+    return ok;
 }
 
-std::string App::resolve_hotkey_action(int key) const {
-    for (const auto& [action, key_str] : settings_.hotkeys) {
-        if (hotkey_string_to_key(key_str) == key) return action;
+void App::rebuild_key_bindings() {
+    key_bindings_.clear();
+    auto name_of = [](HotkeyAction action) -> std::string {
+        for (const auto& d : hotkey_defs()) if (d.action == action) return d.name;
+        return "?";
+    };
+    std::string first_problem;
+    int problems = 0;
+    auto report = [&](const std::string& msg) { if (first_problem.empty()) first_problem = msg; ++problems; };
+
+    for (const auto& d : hotkey_defs()) {
+        auto it = settings_.hotkeys.find(d.name);
+        const std::string keys = (it != settings_.hotkeys.end()) ? it->second : d.default_keys;
+        std::vector<int> codes;
+        if (!hotkey_string_to_keys(keys, codes)) report("unknown key \"" + keys + "\" for " + d.name);
+        for (int code : codes) {
+            auto [pos, inserted] = key_bindings_.emplace(code, d.action);
+            if (!inserted && pos->second != d.action)
+                report("key clash: " + std::string(d.name) + "=\"" + keys + "\" already used by " + name_of(pos->second));
+        }
     }
-    return "";
+    if (!key_binding_warning_.empty() && status_line_ == key_binding_warning_) status_line_.clear();
+    key_binding_warning_.clear();
+    if (!first_problem.empty()) {
+        key_binding_warning_ = problems > 1 ? first_problem + " (+" + std::to_string(problems - 1) + " more)" : first_problem;
+        status_line_ = key_binding_warning_;
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -573,6 +612,8 @@ void App::launch_load_async(fs::path local_path, std::string title, std::string 
         pl.title = title;
         pl.artist = artist;
         pl.location_label = location_label;
+        pl.is_local = is_local;
+        pl.video_id = video_id;
 
         double t_resolve = 0.0, t_probe = 0.0;
 
@@ -689,6 +730,7 @@ void App::poll_pending_load() {
 
     if (!pl.success) {
         status_line_ = pl.error;
+        replaying_history_ = false;
         return;
     }
 
@@ -700,7 +742,14 @@ void App::poll_pending_load() {
     total_sec_ = pl.total_sec;
     metadata_ = pl.metadata;
     current_path_ = pl.path;
+    current_video_id_ = pl.is_local ? "" : pl.video_id;
     has_track_ = true;
+    if (replaying_history_) {
+        replaying_history_ = false; // play_previous() already left this track at history_.back()
+    } else {
+        history_.push_back({pl.is_local, pl.title, pl.artist, pl.is_local ? pl.path : fs::path{}, pl.video_id});
+        if (history_.size() > kHistoryMax) history_.erase(history_.begin());
+    }
     player_.clear_finished(); // see clear_finished()'s comment — closes the race that caused the double-skip bug
     waveform_envelope_.clear();
     waveform_ready_ = false;
@@ -718,7 +767,7 @@ void App::poll_pending_load() {
     // moment decode produces its first chunk, not after the whole track.
     // Dispatched off the main thread — see launch_device_play_async().
     launch_device_play_async();
-    status_line_.clear();
+    if (status_line_ != key_binding_warning_) status_line_.clear(); // a key clash warning stays until something else replaces it
 }
 
 void App::launch_device_play_async() {
@@ -797,10 +846,29 @@ void App::play_selected() {
     else start_online_track(online_view_[selected_]);
 }
 
+int App::playing_row() const {
+    if (list_source_ == ListSource::Local) {
+        if (current_path_.empty() || !current_video_id_.empty()) return -1;
+        for (size_t i = 0; i < local_view_.size(); ++i)
+            if (local_view_[i].path == current_path_) return static_cast<int>(i);
+    } else {
+        if (current_video_id_.empty()) return -1;
+        for (size_t i = 0; i < online_view_.size(); ++i)
+            if (online_view_[i].video_id == current_video_id_) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 void App::play_relative(int delta) {
     size_t list_len = (list_source_ == ListSource::Local) ? local_view_.size() : online_view_.size();
     if (list_len == 0) return;
-    int target = selected_ + delta;
+    // Step from the playing track's row, so moving the cursor while
+    // listening doesn't change what plays next. Falls back to the cursor
+    // when the playing track isn't in this list (filtered out, online, or
+    // nothing played yet).
+    int base = playing_row();
+    if (base < 0) base = selected_;
+    int target = base + delta;
     // Past either end: do nothing. Clamping here used to replay the last
     // track forever once list-mode playback reached the end of the list.
     if (target < 0 || target >= static_cast<int>(list_len)) return;
@@ -824,25 +892,49 @@ void App::play_relative_random() {
     play_selected();
 }
 
+void App::start_queue_item(const QueueItem& item) {
+    if (item.is_local) {
+        LocalTrack t{fs::path(item.local_path).stem().string(), item.local_path, item.artist};
+        start_local_track(t);
+    } else {
+        OnlineResult r{item.video_id, item.title, item.artist};
+        start_online_track(r);
+    }
+}
+
+bool App::play_from_queue() {
+    if (queue_.empty()) return false;
+    if (load_in_progress_.load()) { status_line_ = "still loading the previous track ..."; return true; } // keep the item queued
+    QueueItem item = queue_.front();
+    queue_.erase(queue_.begin());
+    if (queue_selected_ > 0) --queue_selected_; // indices shifted down by the erase
+    clamp_queue_selected();
+    start_queue_item(item);
+    return true;
+}
+
+void App::play_next() {
+    if (play_from_queue()) return;
+    play_relative(1);
+}
+
+void App::play_previous() {
+    if (load_in_progress_.load()) { status_line_ = "still loading the previous track ..."; return; }
+    if (history_.size() >= 2) {
+        history_.pop_back(); // the track playing now
+        replaying_history_ = true;
+        start_queue_item(history_.back());
+        return;
+    }
+    play_relative(-1);
+}
+
 void App::advance_track() {
     has_track_ = false;
 
-    // The queue always takes priority over play_mode — it's an explicit
+    // The queue always takes priority over play_mode - it's an explicit
     // user-built-up-next list.
-    if (!queue_.empty()) {
-        QueueItem item = queue_.front();
-        queue_.erase(queue_.begin());
-        if (queue_selected_ > 0) --queue_selected_; // indices shifted down by the erase
-        clamp_queue_selected();
-        if (item.is_local) {
-            LocalTrack t{fs::path(item.local_path).stem().string(), item.local_path, item.artist};
-            start_local_track(t);
-        } else {
-            OnlineResult r{item.video_id, item.title, item.artist};
-            start_online_track(r);
-        }
-        return;
-    }
+    if (play_from_queue()) return;
 
     switch (settings_.play_mode) {
         case 1: // loop — same track, already fully decoded, no reload needed
@@ -902,15 +994,53 @@ void App::queue_move_hovering(int dir) {
 }
 
 // Tab layout: 0=Colors, 1=On/Off, 2=Animation, 3=Reference, 4=About App.
-// Reference-tab rows map to specific well-known hotkey action keys in
-// settings_.hotkeys (a plain string->string map already), so they don't
-// need their own struct fields the way Colors/On-Off/Animation do.
-static const char* kRefHotkeyNames[] = {
-    "HKeySetting", "HKeyNavigateUp", "HKeyNavigateDown", "HKeyPlay", "HKeyPlayNextSong",
-    "HKeyPlayPreviousSong", "HKeyToggleRepeat", "HKeyToggleShuffle", "HKeySearch",
-    "HKeySearchOnline", "HKeyQuit",
-};
-static constexpr int kRefRowCount = 11;
+// Reference-tab rows are the hotkey table (hotkey_defs() in settings.h),
+// in order, stored in settings_.hotkeys (a plain string->string map
+// already), so they don't need their own struct fields the way
+// Colors/On-Off/Animation do. Read-only font-map rows follow them.
+static int ref_row_count() { return static_cast<int>(hotkey_defs().size()); }
+
+// About App tab text. Kept here, not in config.txt, so the credits can't
+// drift or be dropped by an old config, and every install shows the same text.
+static const std::vector<std::string>& about_lines() {
+    static const std::vector<std::string> lines = {
+        "Mousiki",
+        "Maintained by   : qoolpix.music",
+        "                  instagram.com/qoolpix.music",
+        "",
+        "Originally created by ender",
+        "Original GitHub : itzender5820",
+        "Original repo   : github.com/itzender5820/mousiki",
+        "License         : Apache License 2.0",
+        "",
+        "A terminal music player built for people who",
+        "prefer control, simplicity, and a keyboard.",
+        "",
+        "Mousiki is designed around a fast, focused TUI",
+        "with no unnecessary interface layers.",
+        "",
+        "Everything is keyboard-driven.",
+        "Everything is configurable.",
+        "Everything stays in your terminal.",
+        "",
+        "Features",
+        "- Local music playback",
+        "- Search and filtering",
+        "- Queue management",
+        "- Online search and streaming",
+        "- Lyrics with active-word highlighting",
+        "- Shuffle and repeat",
+        "- Fully configurable colors",
+        "- Fully configurable hotkeys",
+        "",
+        "Configuration",
+        "$HOME/.config/mousiki/config.txt",
+        "",
+        "Mousiki is free software.",
+        "Built with care for the terminal.",
+    };
+    return lines;
+}
 
 std::string* App::color_field_ptr(int row, int col) {
     switch (row) {
@@ -936,7 +1066,7 @@ int App::settings_max_row() const {
     // Matches get_max_row(): SCHEMA.size() - 1 for each tab, extended for
     // the Reference tab's appended font-map rows and the About tab's
     // scrollable text (both computed dynamically, not hardcoded, so they
-    // track the actual font_map/about_app_lines content).
+    // track the actual font_map/about_lines() content).
     switch (settings_tab_) {
         case 0: return 13; // COLOR_SCHEMA: 14 rows
         case 1: return 6;  // ONOFF_SCHEMA: 7 rows
@@ -944,12 +1074,12 @@ int App::settings_max_row() const {
         case 3: {
             int letters = 0;
             for (char c = 'A'; c <= 'Z'; ++c) if (settings_.font_map.count(c)) ++letters;
-            return kRefRowCount + letters - 1; // 11 hotkeys + N font-map rows
+            return ref_row_count() + letters - 1; // hotkey rows + N font-map rows
         }
         case 4: {
             int MAX_Y = std::max(main_frame_height(80) - 2, 10);
             int visible = std::max(1, MAX_Y - 3);
-            int total = static_cast<int>(settings_.about_app_lines.size());
+            int total = static_cast<int>(about_lines().size());
             return std::max(0, total - visible); // scroll range, not a field cursor
         }
         default: return 0;
@@ -992,8 +1122,8 @@ std::string App::settings_get_value(int row, int col) const {
             }
         }
     }
-    if (settings_tab_ == 3 && row >= 0 && row < kRefRowCount) {
-        auto it = settings_.hotkeys.find(kRefHotkeyNames[row]);
+    if (settings_tab_ == 3 && row >= 0 && row < ref_row_count()) {
+        auto it = settings_.hotkeys.find(hotkey_defs()[row].name);
         return it != settings_.hotkeys.end() ? it->second : "";
     }
     return "";
@@ -1062,8 +1192,9 @@ void App::settings_commit_edit() {
                 else settings_.lyrics_animation = 0;
                 break;
         }
-    } else if (settings_tab_ == 3 && settings_row_ >= 0 && settings_row_ < kRefRowCount) {
-        settings_.hotkeys[kRefHotkeyNames[settings_row_]] = buf;
+    } else if (settings_tab_ == 3 && settings_row_ >= 0 && settings_row_ < ref_row_count()) {
+        settings_.hotkeys[hotkey_defs()[settings_row_].name] = buf;
+        rebuild_key_bindings(); // takes effect now; 's' still decides whether it's saved
     }
 }
 
@@ -1087,10 +1218,10 @@ void App::handle_settings_key(int key) {
     if (mode_ == Mode::ColorEdit) {
         if (key == 27) { mode_ = Mode::Settings; return; } // cancel, discard buffer
         if (key == '\r' || key == '\n') {
-            std::string key_name = (settings_tab_ == 3 && settings_row_ >= 0 && settings_row_ < kRefRowCount)
-                                  ? kRefHotkeyNames[settings_row_] : "";
-            settings_commit_edit();
+            std::string key_name = (settings_tab_ == 3 && settings_row_ >= 0 && settings_row_ < ref_row_count())
+                                  ? hotkey_defs()[settings_row_].name : "";
             status_line_ = key_name.empty() ? "UPDATED" : ("UPDATED " + key_name);
+            settings_commit_edit(); // after, so a key clash reported by the rebuild isn't overwritten
             mode_ = Mode::Settings;
             return;
         }
@@ -1115,25 +1246,25 @@ void App::handle_settings_key(int key) {
     }
     if (settings_tab_ == 4) {
         // About App: no fields to edit, but Up/Down still scroll the text.
-        if (key == 'A') { if (settings_row_ > 0) --settings_row_; return; }
-        if (key == 'B') { if (settings_row_ < settings_max_row()) ++settings_row_; return; }
+        if (key == KEY_ARROW_UP) { if (settings_row_ > 0) --settings_row_; return; }
+        if (key == KEY_ARROW_DOWN) { if (settings_row_ < settings_max_row()) ++settings_row_; return; }
         return;
     }
 
     if (key == '\r' || key == '\n') {
-        if (settings_tab_ == 3 && settings_row_ >= kRefRowCount) return; // font-map rows are read-only display
+        if (settings_tab_ == 3 && settings_row_ >= ref_row_count()) return; // font-map rows are read-only display
         color_edit_buffer_ = settings_get_value(settings_row_, settings_col_);
         mode_ = Mode::ColorEdit;
         return;
     }
-    if (key == 'A') { if (settings_row_ > 0) --settings_row_; return; }
-    if (key == 'B') { if (settings_row_ < settings_max_row()) ++settings_row_; return; }
-    if (key == 'C') { // right
+    if (key == KEY_ARROW_UP) { if (settings_row_ > 0) --settings_row_; return; }
+    if (key == KEY_ARROW_DOWN) { if (settings_row_ < settings_max_row()) ++settings_row_; return; }
+    if (key == KEY_ARROW_RIGHT) {
         if (settings_tab_ == 0) { if (color_field_ptr(settings_row_, 1)) settings_col_ = 1; }
         else settings_cycle(1);
         return;
     }
-    if (key == 'D') { // left
+    if (key == KEY_ARROW_LEFT) {
         if (settings_tab_ == 0) settings_col_ = 0;
         else settings_cycle(-1);
         return;
@@ -1189,20 +1320,24 @@ void App::handle_key(int key) {
         return;
     }
 
-    // Mode::Browse
+    // Mode::Browse -- every key goes through the configurable bindings.
     size_t list_len = (list_source_ == ListSource::Local) ? local_view_.size() : online_view_.size();
 
-    switch (key) {
-        case 's': case 'S':
+    auto bound = key_bindings_.find(key);
+    if (bound == key_bindings_.end()) return;
+
+    using A = HotkeyAction;
+    switch (bound->second) {
+        case A::OpenSettings:
             mode_ = Mode::Settings;
             settings_tab_ = 0;
             settings_row_ = 0;
             settings_col_ = 0;
             break;
-        case 9: // Tab: toggle Up/Down + reorder focus between the list and the queue
+        case A::SwitchFocus: // toggle Up/Down + reorder focus between the list and the queue
             queue_focus_ = !queue_focus_;
             break;
-        case 'A': // up
+        case A::NavigateUp:
             if (queue_focus_) {
                 if (queue_selected_ > 0) --queue_selected_;
                 clamp_queue_selected();
@@ -1211,7 +1346,7 @@ void App::handle_key(int key) {
                 if (selected_ < scroll_) scroll_ = selected_;
             }
             break;
-        case 'B': // down
+        case A::NavigateDown:
             if (queue_focus_) {
                 if (!queue_.empty() && queue_selected_ < static_cast<int>(queue_.size()) - 1) ++queue_selected_;
                 clamp_queue_selected();
@@ -1223,73 +1358,73 @@ void App::handle_key(int key) {
                 if (selected_ >= scroll_ + kListVisibleRows) scroll_ = selected_ - kListVisibleRows + 1;
             }
             break;
-        case 'C': // right = seek forward
+        case A::SeekForward:
             if (has_track_) player_.seek_relative(5.0);
             break;
-        case 'D': // left = seek back ... OR, while queue-focused, move the hovering queue item down.
-            // Left-arrow and Shift+D are indistinguishable at the terminal-
-            // input layer (see TerminalIO::poll_key) — reusing this case
-            // for reordering while queue-focused means seeking is
-            // unavailable during that time, but that's an acceptable
-            // trade since you're not usually seeking while reordering a
-            // queue anyway.
+        case A::SeekBackward: // seek back ... OR, while queue-focused, move the hovering queue item down.
+            // This doubling dates from when Left arrow and Shift+D were the
+            // same key code. They're separate now (MoveQueueItemDown has
+            // its own binding), but the queue-focused behavior is kept.
             if (queue_focus_) queue_move_hovering(1);
             else if (has_track_) player_.seek_relative(-5.0);
             break;
-        case 'u': case 'U': // move the hovering queue item up (only meaningful once you've Tab'd into the queue)
+        case A::MoveQueueItemUp: // only meaningful once you've Tab'd into the queue
             queue_move_hovering(-1);
             break;
-        case 'p': case 'P': // play/pause
+        case A::MoveQueueItemDown:
+            queue_move_hovering(1);
+            break;
+        case A::TogglePlayPause:
             if (has_track_) { if (player_.is_paused()) player_.resume(); else player_.pause(); }
             break;
-        case '1': // volume up
+        case A::IncreaseVolume:
             if (has_track_) player_.set_volume(std::min(100, player_.volume() + 5));
             break;
-        case '2': // volume down
+        case A::DecreaseVolume:
             if (has_track_) player_.set_volume(std::max(0, player_.volume() - 5));
             break;
-        case 'n': case 'N': // next song (within current list)
-            play_relative(1);
+        case A::NextSong: // next queued track, else the row after the playing track
+            play_next();
             break;
-        case 'b': // prev song (within current list)
-            play_relative(-1);
+        case A::PreviousSong: // back through play history, else the row above the playing track
+            play_previous();
             break;
-        case 'a': // add selected to queue
+        case A::AddToQueue: // add selected to queue
             queue_add_selected();
             break;
-        case 'd': // remove last queued item
+        case A::RemoveLastFromQueue:
             queue_remove_last();
             break;
-        case 'l': case 'L': // retry lyrics fetch for the current track
+        case A::RetryLyrics: // retry lyrics fetch for the current track
             if (has_track_) {
                 launch_lyrics_fetch(metadata_.name, metadata_.artist == "-" ? "" : metadata_.artist, current_path_);
                 status_line_ = "retrying lyrics ...";
             }
             break;
-        case 'w': case 'W': // toggle waveform style (raw/smooth) directly, without going into Settings
+        case A::ToggleWaveform: // toggle waveform style (raw/smooth) directly, without going into Settings
             settings_.waveform_smooth = !settings_.waveform_smooth;
             recompute_waveform_for_current_track();
             status_line_ = settings_.waveform_smooth ? "waveform: smooth" : "waveform: raw";
             break;
-        case 't': // remove the hovering song from the queue
+        case A::RemoveHoveringFromQueue:
             queue_remove_hovering();
             status_line_ = "removed from queue";
             break;
-        case 'T': // cycle local-list sort mode (folder order -> title A-Z -> artist A-Z)
+        case A::CycleSort: // cycle local-list sort mode (folder order -> title A-Z -> artist A-Z)
             local_sort_mode_ = (local_sort_mode_ + 1) % 3;
             refresh_local_view();
             status_line_ = std::string("sort: ") + sort_mode_name(local_sort_mode_);
             break;
-        case '\r': case '\n':
+        case A::Play:
             play_selected();
             break;
-        case '/':
+        case A::Search:
             mode_ = Mode::Search;
             search_buffer_.clear();
             pre_search_list_source_ = list_source_;
             pre_search_local_query_ = last_local_query_;
             break;
-        case 27: // ESC -- back to the home view: full local library, no
+        case A::Home: // back to the home view: full local library, no
                  // filter, from the top. Same destination regardless of
                  // how buried you are (mid search results, viewing
                  // online results, scrolled deep into the list).
@@ -1298,7 +1433,7 @@ void App::handle_key(int key) {
             refresh_local_view();
             status_line_.clear();
             break;
-        case 'r': case 'R': // force a full redraw -- for when a resize
+        case A::Redraw: // force a full redraw -- for when a resize
                              // raced the render loop and left a torn/
                              // stale frame on screen. hard_clear is
                              // normally only set on a detected width or
@@ -1306,10 +1441,8 @@ void App::handle_key(int key) {
                              // unconditionally on the very next frame.
             force_redraw_ = true;
             break;
-        case 'q': case 'Q':
+        case A::Quit:
             quit_ = true;
-            break;
-        default:
             break;
     }
 }
@@ -2034,10 +2167,14 @@ void App::build_settings_screen(std::ostringstream& frame, int W, int player_h) 
     add("\u250c\u2500 SETTINGS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510", "\u2502                    \u2514", 22);
     for (size_t idx = 0; idx < top_tabs.size(); ++idx) {
         int i = top_tabs[idx];
-        std::string lab = (i == settings_tab_) ? ("[" + std::string(kTabNames[i]) + "]") : kTabNames[i];
-        int lab_len = static_cast<int>(lab.size());
+        bool active = (i == settings_tab_);
+        std::string lab = active ? ("[" + std::string(kTabNames[i]) + "]") : kTabNames[i];
+        int lab_len = static_cast<int>(lab.size()); // visible width, measured before the highlight escapes go on
+        // Reverse video marks the active tab. 27m turns off only the
+        // reverse, so the border color the line started with carries on.
+        std::string shown = active ? (HI + lab + "\x1b[27m") : lab;
         bool is_last = (idx == top_tabs.size() - 1);
-        add("  " + lab + "  \u250c", repeat("\u2500", 4 + lab_len) + "\u2518", 5 + lab_len);
+        add("  " + shown + "  \u250c", repeat("\u2500", 4 + lab_len) + "\u2518", 5 + lab_len);
         if (is_last) add("\u2500", " ", 1);
         else add("\u2500\u2500\u2510", "  \u2514", 3);
     }
@@ -2097,8 +2234,8 @@ void App::build_settings_screen(std::ostringstream& frame, int W, int player_h) 
             y++;
         }
     } else if (settings_tab_ == 1 || settings_tab_ == 2) {
-        static const char* onoff_l[7] = {"Eliment Disk", "Dummy Buttons", "Queue Display", "WaveForm",
-                                          "Lyrics Engine", "Lyric Ball", "Visualizer"};
+        static const char* onoff_l[7] = {"Disk", "Dummy Buttons", "Queue", "Waveform",
+                                          "Lyrics", "Lyric Ball", "Visualizer"};
         static const char* anim_l[8] = {"Vis. Fluidity", "Waveform Style", "Disk Speed", "Playback Mode",
                                          "Vis. Degradation", "Vis. Viscosity", "Lyrics Alignment", "Lyrics Animation"};
         int count = (settings_tab_ == 1) ? 7 : 8;
@@ -2116,22 +2253,20 @@ void App::build_settings_screen(std::ostringstream& frame, int W, int player_h) 
             y++;
         }
     } else if (settings_tab_ == 3) {
-        // Reference tab: the 11 editable hotkeys, then a blank divider,
+        // Reference tab: the editable hotkeys, then a blank divider,
         // then a read-only display of the font-mapping table (section 4
         // of the config, "A={A,a}" style) loaded from config.txt -- as
         // "A = A, a" rows. Combined they're usually taller than the
         // player view, so this scrolls as one list (viewport follows
         // settings_row_, centered) rather than ever growing the panel
         // past player_h.
-        static const char* ref_l[kRefRowCount] = {"Open Settings", "Navigate Up", "Navigate Down", "Play / Pause",
-                                                    "Next Track", "Prev Track", "Toggle Repeat", "Toggle Shuffle",
-                                                    "Search Local", "Search Online", "Quit Application"};
+        const int ref_rows = ref_row_count();
         std::vector<char> letters;
         for (char c = 'A'; c <= 'Z'; ++c) if (settings_.font_map.count(c)) letters.push_back(c);
-        int display_count = kRefRowCount + 1 + static_cast<int>(letters.size()); // +1 for the divider row
+        int display_count = ref_rows + 1 + static_cast<int>(letters.size()); // +1 for the divider row
         int visible = std::max(1, MAX_Y - 3);
         auto to_display_row = [&](int selectable_row) {
-            return (selectable_row < kRefRowCount) ? selectable_row : selectable_row + 1;
+            return (selectable_row < ref_rows) ? selectable_row : selectable_row + 1;
         };
         int cur_display = to_display_row(settings_row_);
         int scroll = std::clamp(cur_display - visible / 2, 0, std::max(0, display_count - visible));
@@ -2140,19 +2275,19 @@ void App::build_settings_screen(std::ostringstream& frame, int W, int player_h) 
             int disp = scroll + r;
             if (disp >= display_count) break;
             pos(y, 1, B(y) + "\u2502" + R); pos(y, W, B(y) + "\u2502" + R);
-            if (disp == kRefRowCount) { y++; continue; } // blank divider row
-            if (disp < kRefRowCount) {
+            if (disp == ref_rows) { y++; continue; } // blank divider row
+            if (disp < ref_rows) {
                 int i = disp;
-                pos(y, 6, pad(ref_l[i], 25)); pos(y, 32, ":");
+                pos(y, 6, pad(hotkey_defs()[i].label, 25)); pos(y, 32, ":");
                 bool sel = (i == settings_row_ && mode_ != Mode::ColorEdit);
                 bool ed = (i == settings_row_ && mode_ == Mode::ColorEdit);
                 std::string v = ed ? pad(color_edit_buffer_, 20) : pad(settings_get_value(i, 0), 20);
                 pos(y, 35, (sel ? HI : "") + (ed ? "\x1b[41;37m" : "") + v + R);
             } else {
-                int li = disp - kRefRowCount - 1;
+                int li = disp - ref_rows - 1;
                 char c = letters[li];
                 const auto& pair = settings_.font_map.at(c);
-                int selectable_row = kRefRowCount + li;
+                int selectable_row = ref_rows + li;
                 bool sel = (selectable_row == settings_row_);
                 std::string line = std::string(1, c) + " = " + pair.first + ", " + pair.second;
                 pos(y, 6, (sel ? HI : "") + line + R);
@@ -2160,16 +2295,15 @@ void App::build_settings_screen(std::ostringstream& frame, int W, int player_h) 
             y++;
         }
     } else if (settings_tab_ == 4) {
-        // About App: shows settings_.about_app_lines (loaded verbatim
-        // from config.txt's trailing ClassTextAboutApp={...}; block, not
-        // a hardcoded string), scrolled so it never exceeds player_h.
+        // About App: shows about_lines(), scrolled so it never exceeds player_h.
+        const auto& about = about_lines();
         int visible = std::max(1, MAX_Y - 3);
-        int total = static_cast<int>(settings_.about_app_lines.size());
+        int total = static_cast<int>(about.size());
         int scroll = std::clamp(settings_row_, 0, std::max(0, total - visible));
         for (int r = 0; r < visible; ++r) {
             pos(y, 1, B(y) + "\u2502" + R); pos(y, W, B(y) + "\u2502" + R);
             int idx = scroll + r;
-            if (idx < total) pos(y, 6, settings_.about_app_lines[idx]);
+            if (idx < total) pos(y, 6, about[idx]);
             y++;
         }
     }
@@ -2181,8 +2315,17 @@ void App::build_settings_screen(std::ostringstream& frame, int W, int player_h) 
         pos(y, 1, B(y) + "\u2514" + repeat("\u2500", W - 2) + "\u2518" + R);
     } else {
         std::string bot = "\u2514\u2500";
-        for (int i : bot_tabs) bot += (i == settings_tab_ ? " [" + std::string(kTabNames[i]) + "] \u2500" : "  " + std::string(kTabNames[i]) + "  \u2500");
-        int rem_bot = W - static_cast<int>(bot.size()); if (rem_bot < 1) rem_bot = 1;
+        const std::string hi_off = "\x1b[27m"; // same reverse-video marking as the top row
+        size_t esc_bytes = 0;                  // escape bytes in bot, which take no columns
+        for (int i : bot_tabs) {
+            if (i == settings_tab_) {
+                bot += " " + HI + "[" + std::string(kTabNames[i]) + "]" + hi_off + " \u2500";
+                esc_bytes += HI.size() + hi_off.size();
+            } else {
+                bot += "  " + std::string(kTabNames[i]) + "  \u2500";
+            }
+        }
+        int rem_bot = W - static_cast<int>(bot.size() - esc_bytes); if (rem_bot < 1) rem_bot = 1;
         pos(y, 1, B(y) + bot + repeat("\u2500", rem_bot - 1) + "\u2518" + R);
     }
     y++;

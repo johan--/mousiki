@@ -63,10 +63,10 @@ int TerminalIO::poll_key() {
         if (read(STDIN_FILENO, &seq[1], 1) != 1) return 27;
         if (seq[0] == '[') {
             switch (seq[1]) {
-                case 'A': return 'A';
-                case 'B': return 'B';
-                case 'C': return 'C';
-                case 'D': return 'D';
+                case 'A': return KEY_ARROW_UP;
+                case 'B': return KEY_ARROW_DOWN;
+                case 'C': return KEY_ARROW_RIGHT;
+                case 'D': return KEY_ARROW_LEFT;
             }
         }
         return 27;

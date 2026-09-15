@@ -30,36 +30,42 @@ I created Mousiki because I wanted a fast, focused TUI (Terminal User Interface)
 
 ## Default Keybindings
 
-Keys are currently fixed in the code. The `HKey...` entries in `$HOME/.config/mousiki/config.txt` are not read yet.
+Every key below can be changed with the `HKey...` entries in `$HOME/.config/mousiki/config.txt`, or on the **REFERENCE** tab in settings. Keys are case-sensitive. To bind several keys to one action, separate them with commas, for example `HKeyQuit="q,Q"`. Special key names: `ARROW_KEY_UP`, `ARROW_KEY_DOWN`, `ARROW_KEY_LEFT`, `ARROW_KEY_RIGHT`, `ENTER`, `TAB`, `SPACE`, `ESC`, `BACKSPACE`, `COMMA`. If two actions share a key, the status line reports the clash.
 
 ### Search & Playback
-| Action | Keybinding | Description |
-| :--- | :--- | :--- |
-| **Local Search** | `/` | Filter the local library as you type. `ENTER` keeps the result, `ESC` cancels |
-| **Online Stream Search** | `/` then `s: query` | Search and stream music online |
-| **Home View** | `ESC` | Back to the full local library, unfiltered |
-| **Play** | `ENTER` | Play the selected track |
-| **Play / Pause** | `p` | Toggle playback |
-| **Next / Previous Track** | `n` / `b` | Play the next or previous row of the current list |
-| **Seek** | `ARROW_LEFT` / `ARROW_RIGHT` | Seek 5 seconds backward / forward |
-| **Volume** | `1` / `2` | Increase / Decrease volume |
-| **Retry Lyrics** | `l` | Fetch lyrics for the current track again |
-| **Waveform Style** | `w` | Toggle raw / smooth waveform |
+| Action | Keybinding | Config name | Description |
+| :--- | :--- | :--- | :--- |
+| **Local Search** | `/` | `HKeySearch` | Filter the local library as you type. `ENTER` keeps the result, `ESC` cancels |
+| **Online Stream Search** | `/` then `s: query` | | Search and stream music online |
+| **Home View** | `ESC` | `HKeyHome` | Back to the full local library, unfiltered |
+| **Play** | `ENTER` | `HKeyPlay` | Play the selected track |
+| **Play / Pause** | `p` / `P` | `HKeyTogglePlayPause` | Toggle playback |
+| **Next Track** | `n` / `N` | `HKeyPlayNextSong` | Play the next queued track. With an empty queue, play the row after the current track |
+| **Previous Track** | `b` | `HKeyPlayPreviousSong` | Go back to the previously played track. With no history, play the row above the current track |
+| **Seek Forward** | `ARROW_RIGHT` | `HKeySeekForward` | Seek 5 seconds forward |
+| **Seek Backward** | `ARROW_LEFT` | `HKeySeekBackward` | Seek 5 seconds backward. With the queue focused, moves the selected item down |
+| **Volume Up** | `1` | `HKeyIncreaseVolume` | Raise volume by 5% |
+| **Volume Down** | `2` | `HKeyDecreaseVolume` | Lower volume by 5% |
+| **Retry Lyrics** | `l` / `L` | `HKeyRetryLyrics` | Fetch lyrics for the current track again |
+| **Waveform Style** | `w` / `W` | `HKeyToggleWaveform` | Toggle raw / smooth waveform |
 
 Shuffle, loop, and stop-after-track are set with `PlaybackMode` in settings (`s`).
 
 ### Navigation & Queue
-| Action | Keybinding | Description |
-| :--- | :--- | :--- |
-| **Navigate** | `ARROW_UP` / `ARROW_DOWN` | Move selection |
-| **Sort** | `T` | Cycle folder order / title A-Z / artist A-Z |
-| **Switch Focus** | `TAB` | Move focus between the library and the queue |
-| **Add to Queue** | `a` | Enqueue selected track |
-| **Remove from Queue** | `t` | Remove the selected queue item |
-| **Remove Last Queued** | `d` | Remove the last item in the queue |
-| **Reorder Queue** | `u` / `ARROW_LEFT` | With the queue focused, move the selected item up / down |
-| **Settings** | `s` | Open settings. `TAB` changes panel, `s` saves and closes, `ESC` closes |
-| **Redraw** | `r` | Redraw the screen after a resize glitch |
+| Action | Keybinding | Config name | Description |
+| :--- | :--- | :--- | :--- |
+| **Navigate Up** | `ARROW_UP` | `HKeyNavigateUp` | Move selection up |
+| **Navigate Down** | `ARROW_DOWN` | `HKeyNavigateDown` | Move selection down |
+| **Sort** | `T` | `HKeyCycleSort` | Cycle folder order / title A-Z / artist A-Z |
+| **Switch Focus** | `TAB` | `HKeySwitchBetweenCards` | Move focus between the library and the queue |
+| **Add to Queue** | `a` | `HKeyAddHoveringSongToQueue` | Enqueue selected track |
+| **Remove from Queue** | `t` | `HKeyRemoveHoveringSongFromQueue` | Remove the selected queue item |
+| **Remove Last Queued** | `d` | `HKeyRemoveLastFromQueue` | Remove the last item in the queue |
+| **Queue Item Up** | `u` / `U` | `HKeyMoveQueueItemUp` | With the queue focused, move the selected item up |
+| **Queue Item Down** | `D` | `HKeyMoveQueueItemDown` | With the queue focused, move the selected item down |
+| **Settings** | `s` / `S` | `HKeySetting` | Open settings. `TAB` changes panel, `s` saves and closes, `ESC` closes |
+| **Redraw** | `r` / `R` | `HKeyRedraw` | Redraw the screen after a resize glitch |
+| **Quit** | `q` / `Q` | `HKeyQuit` | Quit the player |
 | **Quit** | `q` | Exit application |
 
 
@@ -69,7 +75,7 @@ Mousiki relies on a few external tools for audio fetching, decoding, and lyrics.
 
 ```bash
 # Clone the repository
-git clone https://github.com/itzender5820/mousiki.git
+git clone https://github.com/johan--/mousiki.git
 cd mousiki
 
 # Run the setup script (installs dependencies, sets up config, and builds the app)
@@ -111,6 +117,10 @@ Mousiki stands on the shoulders of giants. A huge thank you to the developers be
 ## 📜 License
 
 This project is open-sourced under the [Apache License 2.0](LICENSE). 
+
+## Credits
+
+Mousiki was originally created by ender ([itzender5820 on GitHub](https://github.com/itzender5820), [original repository](https://github.com/itzender5820/mousiki)). This fork is maintained by qoolpix.music ([qoolpix.music on Instagram](https://instagram.com/qoolpix.music)) and includes changes to the original code.
 
 ---
 *Crafted with ❤️ for the terminal by [itzender5820](https://github.com/itzender5820)*

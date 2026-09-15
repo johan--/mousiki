@@ -277,33 +277,40 @@ void apply_theme(Settings& s, const std::string& theme_name) {
 // Default hotkeys
 // =====================================================================
 
+const std::vector<HotkeyDef>& hotkey_defs() {
+    using A = HotkeyAction;
+    static const std::vector<HotkeyDef> defs = {
+        {A::OpenSettings,            "HKeySetting",                     "Open Settings",       "s,S"},
+        {A::NavigateUp,              "HKeyNavigateUp",                  "Navigate Up",         "ARROW_KEY_UP"},
+        {A::NavigateDown,            "HKeyNavigateDown",                "Navigate Down",       "ARROW_KEY_DOWN"},
+        {A::Play,                    "HKeyPlay",                        "Play Selected",       "ENTER"},
+        {A::TogglePlayPause,         "HKeyTogglePlayPause",             "Play / Pause",        "p,P"},
+        {A::NextSong,                "HKeyPlayNextSong",                "Next Track",          "n,N"},
+        {A::PreviousSong,            "HKeyPlayPreviousSong",            "Prev Track",          "b"},
+        {A::SeekForward,             "HKeySeekForward",                 "Seek Forward",        "ARROW_KEY_RIGHT"},
+        {A::SeekBackward,            "HKeySeekBackward",                "Seek Backward",       "ARROW_KEY_LEFT"},
+        {A::IncreaseVolume,          "HKeyIncreaseVolume",              "Volume Up",           "1"},
+        {A::DecreaseVolume,          "HKeyDecreaseVolume",              "Volume Down",         "2"},
+        {A::Search,                  "HKeySearch",                      "Search",              "/"},
+        {A::AddToQueue,              "HKeyAddHoveringSongToQueue",      "Add to Queue",        "a"},
+        {A::RemoveHoveringFromQueue, "HKeyRemoveHoveringSongFromQueue", "Remove from Queue",   "t"},
+        {A::RemoveLastFromQueue,     "HKeyRemoveLastFromQueue",         "Remove Last Queued",  "d"},
+        {A::MoveQueueItemUp,         "HKeyMoveQueueItemUp",             "Queue Item Up",       "u,U"},
+        {A::MoveQueueItemDown,       "HKeyMoveQueueItemDown",           "Queue Item Down",     "D"},
+        {A::SwitchFocus,             "HKeySwitchBetweenCards",          "Switch Focus",        "TAB"},
+        {A::RetryLyrics,             "HKeyRetryLyrics",                 "Retry Lyrics",        "l,L"},
+        {A::ToggleWaveform,          "HKeyToggleWaveform",              "Waveform Style",      "w,W"},
+        {A::CycleSort,               "HKeyCycleSort",                   "Cycle Sort",          "T"},
+        {A::Home,                    "HKeyHome",                        "Home View",           "ESC"},
+        {A::Redraw,                  "HKeyRedraw",                      "Redraw",              "r,R"},
+        {A::Quit,                    "HKeyQuit",                        "Quit Application",    "q,Q"},
+    };
+    return defs;
+}
+
 void apply_default_hotkeys(Settings& s) {
-    if (s.hotkeys.empty()) {
-        s.hotkeys = {
-            {"HKeySetting",                     "s"},
-            {"HKeyNavigateUp",                  "ARROW_KEY_UP"},
-            {"HKeyNavigateDown",                "ARROW_KEY_DOWN"},
-            {"HKeyPlay",                        "ENTER"},
-            {"HKeySearch",                      "/"},
-            {"HKeySearchOnline",                "/s:"},
-            {"HKeyPlayNextSong",                "n"},
-            {"HKeyPlayPreviousSong",            "b"},
-            {"HKeySeekForward",                 "ARROW_KEY_RIGHT"},
-            {"HKeySeekBackward",                "ARROW_KEY_LEFT"},
-            {"HKeyIncreaseVolume",              "1"},
-            {"HKeyDecreaseVolume",              "2"},
-            {"HKeyAddHoveringSongToQueue",      "a"},
-            {"HKeyRemoveHoveringSongFromQueue", "d"},
-            {"HKeySwitchBetweenCards",          "TAB"},
-            {"HKeyToggleRepeat",                "r"},
-            {"HKeyTogglePlayPause",             "p"},
-            {"HKeyToggleShuffle",               "m"},
-            {"HKeyFilterForFolder",             "f"},
-            {"HKeyClearFilter",                 "c"},
-            {"HKeyQuit",                        "q"},
-            {"HKeyResetPreference",             "e"},
-            {"HKeyDownloadStream",              "y"},
-        };
+    for (const auto& d : hotkey_defs()) {
+        if (!s.hotkeys.count(d.name)) s.hotkeys[d.name] = d.default_keys;
     }
 }
 
@@ -382,15 +389,15 @@ static void parse_font_block(std::ifstream& in, Settings& s) {
     }
 }
 
-static void parse_about_app_block(std::ifstream& in, Settings& s) {
+// Older configs carry a ClassTextAboutApp={...}; block. The About tab's
+// text now lives in the app (about_lines() in app.cpp), so the block is
+// read past and ignored, and save_settings() no longer writes it.
+static void skip_about_app_block(std::ifstream& in) {
     std::string line;
     while (std::getline(in, line)) {
         std::string t = trim(line);
         if (t == "};" || t == "}") break;
-        s.about_app_lines.push_back(line);
     }
-    // Trim trailing blank lines so the About tab doesn't end in empty rows.
-    while (!s.about_app_lines.empty() && trim(s.about_app_lines.back()).empty()) s.about_app_lines.pop_back();
 }
 
 // =====================================================================
@@ -414,7 +421,7 @@ static Settings load_from_config(const fs::path& path) {
         }
         // About App text block
         if (t.find("ClassTextAboutApp") != std::string::npos && t.find('{') != std::string::npos) {
-            parse_about_app_block(in, s);
+            skip_about_app_block(in);
             continue;
         }
 
@@ -463,6 +470,11 @@ static Settings load_from_config(const fs::path& path) {
             {"ColorLyricsInactiveFg", "inactive_line_color"}, {"ColorLyricsInactiveBg", "inactive_line_bg_color"},
             {"ColorLyricsActiveLineFg", "active_line_color"}, {"ColorLyricsActiveLineBg", "active_line_bg_color"},
             {"ColorLyricsActiveWordFg", "active_word_color"}, {"ColorLyricsActiveWordBg", "active_word_bg_color"},
+            {"ShowDisk", "Element_disk"}, {"ShowDummyButtons", "Element_dummy_buttons"},
+            {"ShowQueue", "Element_queue"}, {"ShowWaveform", "Element_waveform"},
+            {"ShowLyrics", "Element_lyrics"}, {"ShowLyricBall", "Element_lyrics_placeholder_ball"},
+            {"ShowVisualizer", "Element_visualizer"},
+            // Older names (misspelled "Eliment"), still read so existing configs keep working.
             {"ElimentDisk", "Eliment_disk"}, {"ElimentDummyButtons", "Element_dummy_buttons"},
             {"ElimentQueue", "Eliment_queue"}, {"ElimentWaveForm", "Eliment_waveform_progress_bar"},
             {"ElimentLyrics", "Eliment_lyrics"}, {"LyricsPlaceholderBall", "Eliment_lyrics_placeholder_ball"},
@@ -473,7 +485,7 @@ static Settings load_from_config(const fs::path& path) {
             {"UpperLeftCorner", "upper_left_corner"}, {"UpperRightCorner", "upper_right_corner"},
             {"BottomLeftCorner", "bottom_left_corner"}, {"LowerRightCorner", "lower_right_corner"},
             {"Vertical", "vertical"}, {"Horizontal", "horizontal"},
-            {"Seprator", "seprator"}, {"ListSeparator", "list_separator"},
+            {"Separator", "separator"}, {"Seprator", "seprator"}, {"ListSeparator", "list_separator"},
         };
         {
             auto it = kKeyAliases.find(key);
@@ -691,17 +703,6 @@ Settings load_settings() {
     // else: all defaults
 
     apply_default_hotkeys(s);
-    if (s.about_app_lines.empty()) {
-        s.about_app_lines = {
-            "Devloper : ender                Github   : itzender5820",
-            "Email    : itz.ender5820@gmail.com",
-            "Version  : orignal and final v1.0        Licence  : Apache licence 2.0",
-            "",
-            "Mousiki",
-            "A terminal music player built for people who prefer control.",
-            "Zero external UI bloat: 100% native POSIX terminal runtime.",
-        };
-    }
     return s;
 }
 
@@ -758,13 +759,13 @@ void save_settings(const Settings& s) {
     out << "##              PANEL 2: ON/OFF\n";
     out << "##-------------------------------------------\n\n";
     auto tf = [](bool v) -> const char* { return v ? "true" : "false"; };
-    out << "ElimentDisk=" << tf(s.element_disk) << "\n";
-    out << "ElimentDummyButtons=" << tf(s.element_dummy_buttons) << "\n";
-    out << "ElimentQueue=" << tf(s.element_queue) << "\n";
-    out << "ElimentWaveForm=" << tf(s.element_waveform) << "\n";
-    out << "ElimentLyrics=" << tf(s.element_lyrics) << "\n";
-    out << "LyricsPlaceholderBall=" << tf(s.element_lyrics_placeholder_ball) << "\n";
-    out << "Visualizer=" << tf(s.element_visualizer) << "\n";
+    out << "ShowDisk=" << tf(s.element_disk) << "\n";
+    out << "ShowDummyButtons=" << tf(s.element_dummy_buttons) << "\n";
+    out << "ShowQueue=" << tf(s.element_queue) << "\n";
+    out << "ShowWaveform=" << tf(s.element_waveform) << "\n";
+    out << "ShowLyrics=" << tf(s.element_lyrics) << "\n";
+    out << "ShowLyricBall=" << tf(s.element_lyrics_placeholder_ball) << "\n";
+    out << "ShowVisualizer=" << tf(s.element_visualizer) << "\n";
     out << "\n";
 
     out << "##-------------------------------------------\n";
@@ -807,7 +808,7 @@ void save_settings(const Settings& s) {
     out << "LowerRightCorner=\"" << s.box_lower_right << "\";\n";
     out << "Vertical=\"" << s.box_vertical << "\";\n";
     out << "Horizontal=\"" << s.box_horizontal << "\";\n";
-    out << "Seprator=\"" << s.meta_separator << "\"\n";
+    out << "Separator=\"" << s.meta_separator << "\"\n";
     out << "ListSeparator=\"" << s.list_separator << "\"\n";
     out << "\n# General\n";
     {
@@ -818,33 +819,23 @@ void save_settings(const Settings& s) {
     for (const auto& path : s.local_music_paths) {
         out << "LocalMusicPath=" << path << "\n";
     }
-    out << "\n# Navigation\n";
-    // Write every mapped hotkey, stable order, whatever the key is named.
-    static const char* hkey_order[] = {
-        "HKeyNavigateUp", "HKeyNavigateDown", "HKeyPlay", "HKeyPlayNextSong", "HKeyPlayPreviousSong",
-        "HKeyTogglePlayPause", "HKeyToggleRepeat", "HKeyToggleShuffle", "HKeySearch", "HKeySearchOnline",
-        "HKeySeekForward", "HKeySeekBackward", "HKeyIncreaseVolume", "HKeyDecreaseVolume",
-        "HKeyAddHoveringSongToQueue", "HKeyRemoveHoveringSongFromQueue", "HKeySwitchBetweenCards",
-        "HKeyFilterForFolder", "HKeyClearFilter", "HKeyQuit", "HKeyResetPreference", "HKeyDownloadStream",
-    };
-    for (const char* name : hkey_order) {
-        auto it = s.hotkeys.find(name);
-        if (it != s.hotkeys.end()) out << name << "=\"" << it->second << "\"\n";
+    out << "\n# Keys\n";
+    out << "## One key, or several separated by commas (n,N). Special keys:\n";
+    out << "## ARROW_KEY_UP ARROW_KEY_DOWN ARROW_KEY_LEFT ARROW_KEY_RIGHT ENTER TAB SPACE ESC BACKSPACE COMMA\n";
+    // Known actions in table order, then any other HKey names the config
+    // carried (they do nothing, but a save shouldn't silently drop them).
+    for (const auto& d : hotkey_defs()) {
+        if (std::string(d.name) == "HKeySetting") continue;
+        auto it = s.hotkeys.find(d.name);
+        if (it != s.hotkeys.end()) out << d.name << "=\"" << it->second << "\"\n";
     }
     for (const auto& [k, v] : s.hotkeys) {
-        if (k == "HKeySetting") continue;
-        bool found = false;
-        for (const char* name : hkey_order) { if (k == name) { found = true; break; } }
-        if (!found) out << k << "=\"" << v << "\"\n";
+        bool known = false;
+        for (const auto& d : hotkey_defs()) { if (k == d.name) { known = true; break; } }
+        if (!known) out << k << "=\"" << v << "\"\n";
     }
     out << "\n";
 
-    out << "##-------------------------------------------\n";
-    out << "##             PANEL 5: ABOUT APP\n";
-    out << "##-------------------------------------------\n\n";
-    out << "ClassTextAboutApp= {\n\n";
-    for (const auto& l : s.about_app_lines) out << l << "\n";
-    out << "\n\n};\n";
 }
 
 } // namespace muisc
